@@ -1,63 +1,155 @@
-const User = require('../models/User');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const User = require("../models/User");
+const bcrypt = require("bcryptjs");
+const generateUniqueId = require("../helpers/generateUniqueId");
+const createHttpError = require("http-errors");
+const QRCode = require("qrcode");
+const {
+  signAccessToken,
+  signRefreshToken,
+} = require("../middlewares/authMiddleware");
 
-exports.register = async (req, res) => {
-  // Hash the password
-  const hashedPassword = await bcrypt.hash(req.body.password, 10);
-
-  const user = new User({
-    username: req.body.username,
-    email: req.body.email,
-    password: hashedPassword,
-  });
-
+const createNewUser = async (req, res) => {
   try {
-    await user.save();
-    const payload = {
-        userId : user._id
+    const result = req.body;
+    const doesExist = await User.findOne({ email: result.email });
+    if (doesExist) {
+      throw createHttpError.Conflict(`${result.email} is already registered`);
     }
-    const secretKey = process.env.SECRET_KEY;
-    const options = {
-        expiresIn : '3h'
-    }
-    const token = jwt.sign(payload, secretKey, options);
-    res.status(201).json({ token });
-  } catch (err) {
-    res.status(400).json({ message: err.message });
+
+    const user = new User(result);
+    const savedUser = await user.save();
+
+    const qrCodeContent = JSON.stringify({ userId: savedUser._id });
+    const qrCodeUrl = await QRCode.toDataURL(qrCodeContent);
+
+    savedUser.qrCodeUrl = qrCodeUrl;
+    await savedUser.save();
+
+    const accessToken = await signAccessToken(savedUser.id, savedUser.role);
+    const refreshToken = await signRefreshToken(savedUser.id);
+
+    // Send response with tokens
+    res.status(201).send({ accessToken, refreshToken, qrCodeUrl });
+  } catch (error) {
+    // Handle validation or other errors
+    if (error.isJoi === true) error.status = 422;
+    res.status(error.status || 500).json({ message: error.message });
   }
 };
 
-exports.login = async (req, res) => {
-  const user = await User.findOne({ email: req.body.email });
-  if (!user) return res.status(401).json({ message: 'User Not Found' });
+const loginUser = async (req, res, next) => {
+  try {
+    const result = req.body;
 
-  const isPasswordValid = await bcrypt.compare(req.body.password, user.password);
-  if (!isPasswordValid) return res.status(401).json({ message: 'Invalid credentials' });
+    const user = await User.findOne({ email: result.email });
 
-  const payload = {
-        userId : user._id
-    }
-  const secretKey = process.env.SECRET_KEY;
-  const options = {
-        expiresIn : '3h'
-    }
-  const token = jwt.sign(payload, secretKey, options);
-  res.json({ token });
+    if (!user) throw createHttpError.NotFound("User not registered");
+
+    const isMatch = await user.isValidPassword(result.password);
+
+    if (!isMatch)
+      throw createHttpError.Unauthorized("Email or password not valid");
+
+    const accessToken = await signAccessToken(user.id, user.role);
+    const refreshToken = await signRefreshToken(user.id);
+    res.send({ accessToken, refreshToken });
+  } catch (error) {
+    if (error.isJoi == true)
+      return next(createHttpError.BadRequest("Invalid Email/Password"));
+    next(error);
+  }
 };
 
-exports.checkIn = async (req, res) => {
-  const user = await User.findById(req.userId);
-  user.checkedIn = true;
-  user.checkInTime = new Date();
-  await user.save();
-  res.json({ message: 'Checked in successfully' });
+const getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json(user);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 };
 
-exports.checkOut = async (req, res) => {
-  const user = await User.findById(req.userId);
-  user.checkedIn = false;
-  user.checkOutTime = new Date();
-  await user.save();
-  res.json({ message: 'Checked out successfully' });
+const getAllUser = async (req, res) => {
+  try {
+    const users = await User.find();
+    res.status(200).json(users);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const checkIn = async (req, res) => {
+  try {
+    const user = await User.findById(req.payload.aud);
+
+    const checkInTime = new Date();
+
+    user.checkedIn = true;
+    user.checkInTime = checkInTime;
+    user.checkIns.push({ time: checkInTime }); // Log the check-in event
+    await user.save();
+
+    res.json({ message: "Checked in successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const checkOut = async (req, res) => {
+  try {
+    const user = await User.findById(req.payload.aud);
+    user.checkedIn = false;
+    user.checkOutTime = new Date();
+    await user.save();
+
+    res.json({ message: "Checked out successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Get all checked-in users with sorting
+const getAllCheckedInUsers = async (req, res) => {
+  try {
+    const sortField = req.query.sortBy || "checkInTime"; // Default sort by checkInTime
+    const sortOrder = req.query.order === "desc" ? -1 : 1; // Default order is ascending
+
+    const checkedInUsers = await User.find({ checkedIn: true }).sort({
+      [sortField]: sortOrder,
+    });
+
+    res.status(200).json(checkedInUsers);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Get all checked-out users with sorting
+const getAllCheckedOutUsers = async (req, res) => {
+  try {
+    const sortField = req.query.sortBy || "checkOutTime"; // Default sort by checkOutTime
+    const sortOrder = req.query.order === "desc" ? -1 : 1; // Default order is ascending
+
+    const checkedOutUsers = await User.find({ checkedIn: false }).sort({
+      [sortField]: sortOrder,
+    });
+
+    res.status(200).json(checkedOutUsers);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = {
+  createNewUser,
+  loginUser,
+  getUserById,
+  getAllUser,
+  checkIn,
+  checkOut,
+  getAllCheckedInUsers,
+  getAllCheckedOutUsers,
 };
