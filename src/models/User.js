@@ -48,20 +48,33 @@ const UserSchema = new mongoose.Schema({
 
 UserSchema.pre("save", async function (next) {
   try {
+    // Check if the password has been modified (for updates)
+    if (!this.isModified("password")) return next();
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(this.password, salt);
     this.password = hashedPassword;
+    console.log("Password hashed successfully:", this.password); // Debug log
     next();
   } catch (error) {
+    console.error("Error during password hashing:", error); // Debug log
     next(error);
   }
 });
 
 UserSchema.methods.isValidPassword = async function (password) {
   try {
-    return await bcrypt.compare(password, this.password);
+    const isMatch = await bcrypt.compare(password, this.password);
+    console.log("Comparing passwords:", {
+      input: password,
+      hash: this.password,
+      isMatch,
+    }); // Debug log
+    return isMatch;
   } catch (error) {
+    console.error("Error comparing passwords:", error); // Debug log
     throw error;
   }
 };
+
 module.exports = mongoose.model("User", UserSchema);

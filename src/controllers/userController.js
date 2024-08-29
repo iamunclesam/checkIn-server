@@ -39,22 +39,22 @@ const createNewUser = async (req, res) => {
 
 const loginUser = async (req, res, next) => {
   try {
-    const result = req.body;
-
-    const user = await User.findOne({ email: result.email });
+    const { email, password } = req.body; // Ensure password is raw input
+    const user = await User.findOne({ email });
 
     if (!user) throw createHttpError.NotFound("User not registered");
 
-    const isMatch = await user.isValidPassword(result.password);
+    // Pass raw password to the isValidPassword method
+    const isMatch = await user.isValidPassword(password);
 
-    if (!isMatch)
+    if (isMatch)
       throw createHttpError.Unauthorized("Email or password not valid");
 
-    const accessToken = await signAccessToken(user.id, user.role);
+    const accessToken = await signAccessToken(user.id);
     const refreshToken = await signRefreshToken(user.id);
     res.send({ accessToken, refreshToken });
   } catch (error) {
-    if (error.isJoi == true)
+    if (error.isJoi === true)
       return next(createHttpError.BadRequest("Invalid Email/Password"));
     next(error);
   }
