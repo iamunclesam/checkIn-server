@@ -4,6 +4,7 @@ const {
   createNewUser,
   loginUser,
   getAllUser,
+  getCurrentUser,
   getUserById,
   getAllCheckedInUsers,
   getAllCheckedOutUsers,
@@ -18,6 +19,7 @@ router.post("/register", createNewUser);
 // Login route
 router.post("/login", loginUser);
 router.get("/user/:id", getUserById);
+router.get("/currentuser", verifyAccessToken, getCurrentUser);
 
 router.get("/users", getAllUser);
 router.get("/checked-in-users", getAllCheckedInUsers);

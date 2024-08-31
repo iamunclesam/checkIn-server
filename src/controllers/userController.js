@@ -47,12 +47,13 @@ const loginUser = async (req, res, next) => {
     // Pass raw password to the isValidPassword method
     const isMatch = await user.isValidPassword(password);
 
-    if (isMatch)
+    if (!isMatch)
       throw createHttpError.Unauthorized("Email or password not valid");
 
-    const accessToken = await signAccessToken(user.id);
+    const accessToken = await signAccessToken(user.id, user.role);
     const refreshToken = await signRefreshToken(user.id);
-    res.send({ accessToken, refreshToken });
+    
+    res.send({ accessToken, refreshToken, role: user.role });
   } catch (error) {
     if (error.isJoi === true)
       return next(createHttpError.BadRequest("Invalid Email/Password"));
@@ -72,9 +73,22 @@ const getUserById = async (req, res) => {
   }
 };
 
+const getCurrentUser = async (req, res) => {
+  try {
+    const userId = await req.payload.aud;
+    const user = await User.findById(userId);
+    console.log("sev-user", user);
+    // Return the user data
+    res.status(200).json(user);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 const getAllUser = async (req, res) => {
   try {
     const users = await User.find();
+
     res.status(200).json(users);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -82,15 +96,24 @@ const getAllUser = async (req, res) => {
 };
 
 const checkIn = async (req, res) => {
+  const { uniqueId } = req.body;
+
   try {
-    const user = await User.findById(req.payload.aud);
+    const user = await User.findOne({ uniqueId });
 
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.checkedIn) {
+      return res.status(400).json({ message: "User already checked in" });
+    }
     const checkInTime = new Date();
-
     user.checkedIn = true;
     user.checkInTime = checkInTime;
     user.checkIns.push({ time: checkInTime }); // Log the check-in event
-    await user.save();
+
+    await user.save(); // Save the updated user data
 
     res.json({ message: "Checked in successfully" });
   } catch (error) {
@@ -99,13 +122,26 @@ const checkIn = async (req, res) => {
 };
 
 const checkOut = async (req, res) => {
-  try {
-    const user = await User.findById(req.payload.aud);
-    user.checkedIn = false;
-    user.checkOutTime = new Date();
-    await user.save();
+  const uniqueId  = req.body;
 
-    res.json({ message: "Checked out successfully" });
+  try {
+    const user = await User.findOne(uniqueId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.checkedOut) {
+      return res.status(400).json({ message: "User already checked Out" });
+    }
+    const checkOutTime = new Date();
+    user.checkedIn = false;
+    user.checkOutTime = checkOutTime;
+    user.checkIns.push({ time: checkOutTime }); // Log the check-in event
+
+    await user.save(); // Save the updated user data
+
+    res.json({ message: "Checked Out successfully" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -147,6 +183,7 @@ module.exports = {
   createNewUser,
   loginUser,
   getUserById,
+  getCurrentUser,
   getAllUser,
   checkIn,
   checkOut,
