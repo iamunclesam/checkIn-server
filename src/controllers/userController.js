@@ -23,6 +23,7 @@ const createNewUser = async (req, res) => {
     const qrCodeUrl = await QRCode.toDataURL(qrCodeContent);
 
     savedUser.qrCodeUrl = qrCodeUrl;
+    savedUser.uniqueId = generateUniqueId(savedUser.username);
     await savedUser.save();
 
     const accessToken = await signAccessToken(savedUser.id, savedUser.role);
@@ -122,10 +123,10 @@ const checkIn = async (req, res) => {
 };
 
 const checkOut = async (req, res) => {
-  const uniqueId  = req.body;
+  const {uniqueId} = req.body;
 
   try {
-    const user = await User.findOne(uniqueId);
+    const user = await User.findOne({uniqueId});
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });

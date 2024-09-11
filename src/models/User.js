@@ -21,16 +21,16 @@ const UserSchema = new mongoose.Schema({
     required: true,
   },
   qrCodeUrl: {
-    type: String, // URL or data URL for the user's QR code
+    type: String, 
   },
   uniqueId: {
     type: String,
-    required: true,
     unique: true,
   },
   role: {
     type: String,
     enum: ["user", "admin"],
+    default: "user",
     required: true,
   },
   checkedIn: {
